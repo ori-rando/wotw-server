@@ -28,7 +28,8 @@ class InfoMessagesService(private val server: WotwBackendServer) {
             .mapIndexed { index, universe -> generateUniverseInfo(universe, COLORS[index % COLORS.size]) },
         multiverse.board != null,
         multiverse.spectators.map { generateUserInfo(it) },
-        multiverse.seed?.id?.value
+        multiverse.seed?.id?.value,
+        multiverse.locked,
     )
 
     fun generateUniverseInfo(universe: Universe, color: String? = null) = UniverseInfo(

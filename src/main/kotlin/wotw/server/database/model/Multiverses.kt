@@ -21,6 +21,7 @@ import kotlin.to
 object Multiverses : LongIdTable("multiverse") {
     val seed = reference("seed", Seeds).nullable()
     val board = jsonb("board", BingoCard.serializer()).nullable()
+    val locked = bool("locked").default(false)
 }
 
 class Multiverse(id: EntityID<Long>) : LongEntity(id) {
@@ -29,6 +30,7 @@ class Multiverse(id: EntityID<Long>) : LongEntity(id) {
     val universes by Universe referrersOn Universes.multiverseId
     val worlds: Collection<World>
         get() = universes.flatMap { it.worlds }
+    var locked by Multiverses.locked
     private val states by GameState referrersOn GameStates.multiverseId
     private val events by BingoEvent referrersOn BingoEvents.multiverseId
     var spectators by User via Spectators

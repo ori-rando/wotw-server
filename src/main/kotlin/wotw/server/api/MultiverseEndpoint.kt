@@ -19,6 +19,7 @@ import wotw.server.sync.multiStates
 import wotw.server.sync.worldStateAggregationRegistry
 import wotw.server.database.model.*
 import wotw.server.exception.ConflictException
+import wotw.server.exception.ForbiddenException
 import wotw.server.io.handleClientSocket
 import wotw.server.main.WotwBackendServer
 import wotw.server.util.logger
@@ -99,8 +100,12 @@ class MultiverseEndpoint(server: WotwBackendServer) : Endpoint(server) {
                     val multiverse =
                         Multiverse.findById(multiverseId) ?: throw NotFoundException("Multiverse does not exist!")
 
-                    if (multiverse.spectators.contains(player))
+                    if (multiverse.spectators.contains(player)) {
                         throw ConflictException("You cannot join this multiverse because you are spectating")
+                    }
+
+                    if (multiverse.locked)
+                        throw ConflictException("You cannot join this multiverse because it is locked")
 
                     val world =
                         if (universeId != null) {
@@ -183,6 +188,10 @@ class MultiverseEndpoint(server: WotwBackendServer) : Endpoint(server) {
                         throw ConflictException("You cannot join this multiverse because you are spectating")
                     }
 
+                    if (multiverse.locked) {
+                        throw ConflictException("You cannot join this multiverse because it is locked")
+                    }
+
                     val world = multiverse.worlds.firstOrNull { it.id.value == worldId }
                         ?: throw NotFoundException("World does not exist!")
 
@@ -232,9 +241,11 @@ class MultiverseEndpoint(server: WotwBackendServer) : Endpoint(server) {
                     if (!multiverse.spectators.contains(player)) {
                         multiverse.spectators = SizedCollection(multiverse.spectators + player)
 
-                        server.connections.toPlayers(multiverse.players.map { it.id.value }, multiverseId, false, PrintTextMessage(
-                            text = "${player.name} is now spectating this game", frames = 180, ypos = -2f,
-                        ))
+                        if (!multiverse.locked) {
+                            server.connections.toPlayers(multiverse.players.map { it.id.value }, multiverseId, false, PrintTextMessage(
+                                text = "${player.name} is now spectating this game", frames = 180, ypos = -2f,
+                            ))
+                        }
                     }
 
                     affectedMultiverseIds.filter { it != multiverseId }.forEach {
@@ -248,6 +259,38 @@ class MultiverseEndpoint(server: WotwBackendServer) : Endpoint(server) {
                 server.connections.toObservers(multiverseId, message = multiverseInfo)
 
                 call.respond(HttpStatusCode.Created)
+            }
+
+            post("multiverses/{multiverse_id}/toggle-lock") {
+                val multiverseId =
+                    call.parameters["multiverse_id"]?.toLongOrNull()
+                        ?: throw BadRequestException("Unparsable MultiverseID")
+
+                val multiverseInfo = newSuspendedTransaction {
+                    val player = authenticatedUser()
+                    wotwPrincipal().require(Scope.MULTIVERSE_LOCK)
+
+                    val multiverse =
+                        Multiverse.findById(multiverseId) ?: throw NotFoundException("Multiverse does not exist!")
+
+                    if (!multiverse.players.contains(player)) {
+                        throw ForbiddenException("You cannot lock/unlock this multiverse since you are not an active player in it")
+                    }
+
+                    multiverse.locked = !multiverse.locked
+
+                    server.connections.toPlayers(
+                        multiverse.players.map { it.id.value }, multiverseId, false, PrintTextMessage(
+                            text = "${player.name} ${if (multiverse.locked) "locked" else "unlocked"} this game", frames = 180, ypos = -2f,
+                        )
+                    )
+
+                    server.infoMessagesService.generateMultiverseInfoMessage(multiverse)
+                }
+
+                server.connections.toObservers(multiverseId, message = multiverseInfo)
+
+                call.respond(HttpStatusCode.OK)
             }
         }
 
